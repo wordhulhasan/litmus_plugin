@@ -7,7 +7,8 @@
 #include <litmus/litmus.h>
 #include <litmus/rt_domain.h>
 #include <litmus/edf_common.h>
-
+#include <litmus/jobs.h>
+#include <litmus/budget.h>
 
 struct demo_cpu_state {
         rt_domain_t     local_queues;
@@ -58,6 +59,25 @@ static long demo_admit_task(struct task_struct *tsk)
         TRACE_TASK(tsk, "The task was rejected by the demo plugin.\n");
         /* Reject every task. */
         return -EINVAL;
+}
+
+static void demo_job_completion(struct task_struct *prev, int budget_exhausted)
+{
+        /* Call common helper code to compute the next release time, deadline,
+         * etc. */
+        prepare_for_next_period(prev);
+}
+
+static void demo_requeue(struct task_struct *tsk, struct demo_cpu_state *cpu_state)
+{
+        if (is_released(tsk, litmus_clock())) {
+                /* Uses __add_ready() instead of add_ready() because we already
+                 * hold the ready lock. */
+                __add_ready(&cpu_state->local_queues, tsk);
+        } else {
+                /* Uses add_release() because we DON'T have the release lock. */
+                add_release(&cpu_state->local_queues, tsk);
+        }
 }
 
 static struct sched_plugin demo_plugin = {
