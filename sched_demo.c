@@ -44,22 +44,35 @@ static void demo_requeue(struct task_struct *tsk, struct demo_cpu_state *cpu_sta
         }
 }
 
+static int demo_check_for_preemption_on_release(rt_domain_t *local_queues)
+{
+        struct demo_cpu_state *state = container_of(local_queues, struct demo_cpu_state,
+                                                    local_queues);
+
+        /* Because this is a callback from rt_domain_t we already hold
+         * the necessary lock for the ready queue. */
+
+        if (edf_preemption_needed(local_queues, state->scheduled)) {
+                preempt_if_preemptable(state->scheduled, state->cpu);
+                return 1;
+        }
+        return 0;
+}
+
 static long demo_activate_plugin(void)
 {
         int cpu;
         struct demo_cpu_state *state;
 
-        // Use our macros to access the per-CPU state for all CPUs
         for_each_online_cpu(cpu) {
                 TRACE("Initializing CPU%d...\n", cpu);
-
                 state = cpu_state_for(cpu);
-
                 state->cpu = cpu;
                 state->scheduled = NULL;
-                edf_domain_init(&state->local_queues, NULL, NULL);
+                edf_domain_init(&state->local_queues,
+                                demo_check_for_preemption_on_release,
+                                NULL);
         }
-
         return 0;
 }
 
@@ -132,7 +145,6 @@ static struct task_struct* demo_schedule(struct task_struct * prev)
         return next;
 }
 
-
 static long demo_admit_task(struct task_struct *tsk)
 {
         TRACE_TASK(tsk, "The task was rejected by the demo plugin.\n");
@@ -168,6 +180,9 @@ static void demo_task_new(struct task_struct *tsk, int on_runqueue,
                 demo_requeue(tsk, state);
         }
 
+        if (edf_preemption_needed(&state->local_queues, state->scheduled))
+                preempt_if_preemptable(state->scheduled, state->cpu);
+
         raw_spin_unlock_irqrestore(&state->local_queues.ready_lock, flags);
 }
 
@@ -199,7 +214,7 @@ static void demo_task_resume(struct task_struct  *tsk)
         unsigned long flags;
         struct demo_cpu_state *state = cpu_state_for(get_partition(tsk));
         lt_t now;
-        TRACE_TASK(tsk, "woke up at %llu\n", litmus_clock());
+        TRACE_TASK(tsk, "wake_up at %llu\n", litmus_clock());
         raw_spin_lock_irqsave(&state->local_queues.ready_lock, flags);
 
         now = litmus_clock();
@@ -216,6 +231,9 @@ static void demo_task_resume(struct task_struct  *tsk)
          * race with the call to schedule(). */
         if (state->scheduled != tsk) {
                 demo_requeue(tsk, state);
+                if (edf_preemption_needed(&state->local_queues, state->scheduled)) {
+                        preempt_if_preemptable(state->scheduled, state->cpu);
+                }
         }
 
         raw_spin_unlock_irqrestore(&state->local_queues.ready_lock, flags);
