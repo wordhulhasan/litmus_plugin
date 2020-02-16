@@ -147,8 +147,10 @@ static struct task_struct* demo_schedule(struct task_struct * prev)
 
 static long demo_admit_task(struct task_struct *tsk)
 {
-        TRACE_TASK(tsk, "The task was rejected by the demo plugin.\n");
-        /* Reject every task. */
+        if (task_cpu(tsk) == get_partition(tsk)) {
+                TRACE_TASK(tsk, "accepted by demo plugin.\n");
+                return 0;
+        }
         return -EINVAL;
 }
 
