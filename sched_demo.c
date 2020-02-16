@@ -147,12 +147,16 @@ static struct task_struct* demo_schedule(struct task_struct * prev)
 
         /* if `prev` suspends, it CANNOT be scheduled anymore => reschedule */
         if (self_suspends) {
-                resched = 1;
+                resched = 0;
         }
 
         /* also check for (in-)voluntary job completions */
-        if (out_of_time || job_completed) {
+        if (out_of_time) {
                 demo_job_completion(prev, out_of_time);
+                resched = 0;
+        }
+
+        if(job_completed){
                 resched = 1;
         }
 
@@ -284,7 +288,7 @@ static void demo_task_resume(struct task_struct  *tsk)
 }
 
 static struct sched_plugin demo_plugin = {
-        .plugin_name            = "DEMO",
+        .plugin_name            = "DEMO_BAD",
         .schedule               = demo_schedule,
         .task_wake_up           = demo_task_resume,
         .admit_task             = demo_admit_task,
