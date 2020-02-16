@@ -5,6 +5,7 @@
 #include <litmus/budget.h>
 #include <litmus/edf_common.h>
 #include <litmus/jobs.h>
+#include <litmus/litmus_proc.h>
 #include <litmus/debug_trace.h>
 #include <litmus/preempt.h>
 #include <litmus/rt_domain.h>
@@ -20,6 +21,39 @@ static DEFINE_PER_CPU(struct demo_cpu_state, demo_cpu_state);
 
 #define cpu_state_for(cpu_id)   (&per_cpu(demo_cpu_state, cpu_id))
 #define local_cpu_state()       (this_cpu_ptr(&demo_cpu_state))
+
+static struct domain_proc_info demo_domain_proc_info;
+
+static long demo_get_domain_proc_info(struct domain_proc_info **ret)
+{
+        *ret = &demo_domain_proc_info;
+        return 0;
+}
+
+static void demo_setup_domain_proc(void)
+{
+        int i, cpu;
+        int num_rt_cpus = num_online_cpus();
+
+        struct cd_mapping *cpu_map, *domain_map;
+
+        memset(&demo_domain_proc_info, 0, sizeof(demo_domain_proc_info));
+        init_domain_proc_info(&demo_domain_proc_info, num_rt_cpus, num_rt_cpus);
+        demo_domain_proc_info.num_cpus = num_rt_cpus;
+        demo_domain_proc_info.num_domains = num_rt_cpus;
+
+        i = 0;
+        for_each_online_cpu(cpu) {
+                cpu_map = &demo_domain_proc_info.cpu_to_domains[i];
+                domain_map = &demo_domain_proc_info.domain_to_cpus[i];
+
+                cpu_map->id = cpu;
+                domain_map->id = i;
+                cpumask_set_cpu(i, cpu_map->mask);
+                cpumask_set_cpu(cpu, domain_map->mask);
+                ++i;
+        }
+}
 
 /* This helper is called when task `prev` exhausted its budget or when
  * it signaled a job completion. */
@@ -73,6 +107,14 @@ static long demo_activate_plugin(void)
                                 demo_check_for_preemption_on_release,
                                 NULL);
         }
+
+        demo_setup_domain_proc();
+        return 0;
+}
+
+static long demo_deactivate_plugin(void)
+{
+        destroy_domain_proc_info(&demo_domain_proc_info);
         return 0;
 }
 
@@ -248,7 +290,9 @@ static struct sched_plugin demo_plugin = {
         .admit_task             = demo_admit_task,
         .task_new               = demo_task_new,
         .task_exit              = demo_task_exit,
+        .get_domain_proc_info   = demo_get_domain_proc_info,
         .activate_plugin        = demo_activate_plugin,
+        .deactivate_plugin      = demo_deactivate_plugin,
         .complete_job           = complete_job,
 };
 
